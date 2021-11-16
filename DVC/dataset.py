@@ -53,7 +53,7 @@ class UVGDataSet(data.Dataset):
         Ibpp = None
         if ref_i_folder == 'H265L20':
             print('use H265L20')
-            Ibpp = []# you need to fill bpps after generating crf=20
+            Ibpp = [0.94005859375]# you need to fill bpps after generating crf=20
         elif ref_i_folder == 'H265L23':
             print('use H265L23')
             Ibpp = []# you need to fill bpps after generating crf=23

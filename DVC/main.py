@@ -266,7 +266,7 @@ if __name__ == "__main__":
     if args.testuvg:
         test_dataset = UVGDataSet(refdir=ref_i_dir, testfull=True)
         print('testing UVG')
-        testuvg(0, testfull=True)
+        testuvg(0, testfull=False)
         exit(0)
 
     tb_logger = SummaryWriter('./events')

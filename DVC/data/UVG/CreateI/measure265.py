@@ -12,7 +12,7 @@ import sys
 import numpy
 from scipy import signal
 from scipy import ndimage
-
+import re
 # import gauss
 import matplotlib.pyplot as plt
 
@@ -126,11 +126,12 @@ def main():
     with open('ffreport.log') as f:
         lines = f.readlines()
 
+    re_exp = re.compile(r" size ([0-9]+) ")
     size_line = []
     for l in lines:
-        if ", size " in l:
-            size = l.split(',')[1]
-            size_line.append(int(size[5:]))
+        match_obj = re_exp.search(l)
+        if match_obj:
+            size_line.append(int(match_obj.group(1)))
 
     size_line = numpy.array(size_line)*8.0/(im_width*im_height)
     # print(size_line)

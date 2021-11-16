@@ -31,7 +31,7 @@ for input in ../videos_crop/*.yuv; do
 
 	rm -rf out/h265
 
-	rm ffreport.log
+	# rm ffreport.log
 
 	rm -rf out/source
 
