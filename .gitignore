@@ -25,8 +25,9 @@ fullperformance/*
 *.bak
 *.bits
 *.rec
-# *.png
+*.png
 *.npy
 *.mp4
 *.mkv
 *.yuv
+savecode/

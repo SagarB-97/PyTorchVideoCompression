@@ -1,0 +1,20 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "args": ["--log", "loguvg.txt", "--testuvg", "--pretrain", "", "--config", "config.json"],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"
+            },
+            "name": "Debug main from test.sh",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "/home/sagar/DNNVideoCodecs/PyTorchVideoCompression/DVC/examples/example/"
+        }
+    ]
+}

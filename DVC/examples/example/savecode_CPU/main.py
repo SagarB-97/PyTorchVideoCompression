@@ -91,11 +91,14 @@ def adjust_learning_rate(optimizer, global_step):
 
 
 def Var(x):
-    return Variable(x.cuda())
+    #return torch.tensor(x, requires_grad=True)#.cuda())
+    return x
 
 def testuvg(global_step, testfull=False):
     with torch.no_grad():
-        test_loader = DataLoader(dataset=test_dataset, shuffle=False, num_workers=0, batch_size=1, pin_memory=True)
+        print('Loading test data')
+        test_loader = DataLoader(dataset=test_dataset, shuffle=False, num_workers=0, batch_size=1, pin_memory=False)
+        print('Loaded test data')
         net.eval()
         sumbpp = 0
         sumpsnr = 0
@@ -257,16 +260,17 @@ if __name__ == "__main__":
     if args.pretrain != '':
         print("loading pretrain : ", args.pretrain)
         global_step = load_model(model, args.pretrain)
-    net = model.cuda()
-    net = torch.nn.DataParallel(net, list(range(gpu_num)))
+        print("Loaded pretrain..")
+    net = model#.cuda()
+    # net = torch.nn.DataParallel(net, list(range(gpu_num)))
     bp_parameters = net.parameters()
     optimizer = optim.Adam(bp_parameters, lr=base_lr)
     # save_model(model, 0)
     global train_dataset, test_dataset
     if args.testuvg:
-        test_dataset = UVGDataSet(refdir=ref_i_dir, testfull=True)
+        test_dataset = UVGDataSet(refdir=ref_i_dir, testfull=False)
         print('testing UVG')
-        testuvg(0, testfull=True)
+        testuvg(0, testfull=False)
         exit(0)
 
     tb_logger = SummaryWriter('./events')
