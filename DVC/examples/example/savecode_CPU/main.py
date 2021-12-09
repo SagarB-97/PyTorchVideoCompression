@@ -134,8 +134,16 @@ def testuvg(global_step, testfull=False):
             for i in range(seqlen):
                 input_image = input_images[:, i, :, :, :]
                 inputframe, refframe = Var(input_image), Var(ref_image)
-                clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
+                # clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
                 
+                byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z = net.forward_encode(input_image, ref_image)
+                clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
+                
+                mse_loss = torch.mean((recon_image - input_image).pow(2))
+                def get_bits_len(byte_stream):
+                    return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
+                bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
+
                 this_bpp = torch.mean(bpp).cpu().detach().numpy()
                 sumbpp += this_bpp
                 bpp_list.append(this_bpp)

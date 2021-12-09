@@ -144,8 +144,9 @@ class VideoCompressor(nn.Module):
         byte_stream_mv, byte_stream_feature, byte_stream_z = self.encode_bytestreams(
             quant_mv, compressed_feature_renorm, recon_sigma, compressed_z)
         
-        return byte_stream_mv, byte_stream_feature, byte_stream_z, \
-                quant_mv.shape, compressed_feature_renorm.shape, compressed_z.shape
+        return byte_stream_mv, quant_mv.shape, \
+            byte_stream_feature, compressed_feature_renorm.shape, \
+            byte_stream_z, compressed_z.shape
 
     def decode_bytestreams(self, byte_stream_mv, shape_mv,
                             byte_stream_feature, shape_feature, 
@@ -161,11 +162,12 @@ class VideoCompressor(nn.Module):
 
                 decoded = torchac.decode_float_cdf(cdfs, byte_stream)
 
-                return decoded
+                return decoded - self.mxrange
             decoded = decode_from_bits(byte_stream_z, shape_z)
 
             return decoded
         compressed_z =  iclr18_estrate_bits_z_decode(byte_stream_z, shape_z)
+        compressed_z = compressed_z.to(torch.float32)
         recon_sigma = self.respriorDecoder(compressed_z)
 
         def feature_probs_based_sigma_decode(byte_stream_feature, shape_feature, sigma):
@@ -177,7 +179,7 @@ class VideoCompressor(nn.Module):
                     cdfs.append(gaussian.cdf(i - 0.5).view(n,c,h,w,1))
                 cdfs = torch.cat(cdfs, 4).cpu().detach()
                 decoded = torchac.decode_float_cdf(cdfs, byte_stream)
-                return decoded
+                return decoded - self.mxrange
             
             mu = torch.zeros_like(sigma)
             sigma = sigma.clamp(1e-5, 1e10)
@@ -187,6 +189,7 @@ class VideoCompressor(nn.Module):
             return decoded
         compressed_feature_renorm = feature_probs_based_sigma_decode(byte_stream_feature, 
                                 shape_feature, recon_sigma)
+        compressed_feature_renorm = compressed_feature_renorm.to(torch.float32)
         
         def iclr18_estrate_bits_mv_decode(byte_stream_mv, shape_mv):
 
@@ -197,10 +200,11 @@ class VideoCompressor(nn.Module):
                     cdfs.append(self.bitEstimator_mv(i - 0.5).view(1, c, 1, 1, 1).repeat(1, 1, h, w, 1))
                 cdfs = torch.cat(cdfs, 4).cpu().detach()
                 decoded = torchac.decode_float_cdf(cdfs, byte_stream)
-                return decoded
+                return decoded - self.mxrange
             decoded = decode_from_bits(byte_stream_mv, shape_mv)
             return decoded
         quant_mv = iclr18_estrate_bits_mv_decode(byte_stream_mv, shape_mv)
+        quant_mv = quant_mv.to(torch.float32)
 
         return quant_mv, compressed_feature_renorm
 
@@ -218,7 +222,7 @@ class VideoCompressor(nn.Module):
         recon_image = prediction + recon_res
         clipped_recon_image = recon_image.clamp(0., 1.)
 
-        return clipped_recon_image
+        return clipped_recon_image, recon_image
 
     def forward(self, input_image, referframe, quant_noise_feature=None, quant_noise_z=None, quant_noise_mv=None):
         estmv = self.opticFlow(input_image, referframe)
