@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "args": ["--log", "loguvg.txt", "--testuvg", "--pretrain", "", "--config", "config.json"],
+            "args": ["--log", "loguvg.txt", "--testuvg", "--pretrain", "snapshot/dvc_pretrain2048.model", "--config", "config.json"],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"
             },

@@ -54,7 +54,7 @@ class VideoCompressor(nn.Module):
         # self.bitEstimator_feature = BitEstimator(out_channel_M)
         self.warp_weight = 0
         self.mxrange = 150
-        self.calrealbits = False
+        self.calrealbits = True
 
     def forwardFirstFrame(self, x):
         output, bittrans = self.imageCompressor(x)
@@ -66,6 +66,159 @@ class VideoCompressor(nn.Module):
         inputfeature = torch.cat((warpframe, ref), 1)
         prediction = self.warpnet(inputfeature) + warpframe
         return prediction, warpframe
+
+    def encode_bytestreams(self, quant_mv, compressed_feature_renorm, recon_sigma, compressed_z):
+        def iclr18_estrate_bits_mv_bytes(mv):
+
+            def getrealbits(x):
+                cdfs = []
+                x = x + self.mxrange
+                n,c,h,w = x.shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(self.bitEstimator_mv(i - 0.5).view(1, c, 1, 1, 1).repeat(1, 1, h, w, 1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+                byte_stream = torchac.encode_float_cdf(cdfs, x.cpu().detach().to(torch.int16), check_input_bounds=True)
+                return byte_stream
+
+            byte_stream = getrealbits(mv)
+
+            return byte_stream
+        byte_stream_mv = iclr18_estrate_bits_mv_bytes(quant_mv)
+
+        def feature_probs_based_sigma_bytes(feature, sigma):
+            
+            def getrealbitsg(x, gaussian):
+                # print("NIPS18noc : mn : ", torch.min(x), " - mx : ", torch.max(x), " range : ", self.mxrange)
+                cdfs = []
+                x = x + self.mxrange
+                n,c,h,w = x.shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(gaussian.cdf(i - 0.5).view(n,c,h,w,1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+                
+                byte_stream = torchac.encode_float_cdf(cdfs, x.cpu().detach().to(torch.int16), check_input_bounds=True)
+                return byte_stream
+
+
+            mu = torch.zeros_like(sigma)
+            sigma = sigma.clamp(1e-5, 1e10)
+            gaussian = torch.distributions.laplace.Laplace(mu, sigma)
+            byte_stream = getrealbitsg(feature, gaussian)
+
+            return byte_stream
+        byte_stream_feature = feature_probs_based_sigma_bytes(compressed_feature_renorm, recon_sigma)
+
+        def iclr18_estrate_bits_z_bytes(z):
+            def getrealbits(x):
+                cdfs = []
+                x = x + self.mxrange
+                n,c,h,w = x.shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(self.bitEstimator_z(i - 0.5).view(1, c, 1, 1, 1).repeat(1, 1, h, w, 1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+                byte_stream = torchac.encode_float_cdf(cdfs, x.cpu().detach().to(torch.int16), check_input_bounds=True)
+                return byte_stream
+            byte_stream = getrealbits(z)
+
+            return byte_stream
+        byte_stream_z = iclr18_estrate_bits_z_bytes(compressed_z)
+
+        return byte_stream_mv, byte_stream_feature, byte_stream_z
+
+    def forward_encode(self, input_image, referframe):
+        estmv = self.opticFlow(input_image, referframe)
+        mvfeature = self.mvEncoder(estmv)
+        quant_mv = torch.round(mvfeature) ## Motion vectors
+
+        quant_mv_upsample = self.mvDecoder(quant_mv)
+        prediction, warpframe = self.motioncompensation(referframe, quant_mv_upsample)
+        input_residual = input_image - prediction
+        feature = self.resEncoder(input_residual)
+        compressed_feature_renorm = torch.round(feature) ## Residual
+
+        z = self.respriorEncoder(feature)
+        compressed_z = torch.round(z) ## Sigma
+
+        recon_sigma = self.respriorDecoder(compressed_z) ## Reconstructed sigma
+
+        byte_stream_mv, byte_stream_feature, byte_stream_z = self.encode_bytestreams(
+            quant_mv, compressed_feature_renorm, recon_sigma, compressed_z)
+        
+        return byte_stream_mv, byte_stream_feature, byte_stream_z, \
+                quant_mv.shape, compressed_feature_renorm.shape, compressed_z.shape
+
+    def decode_bytestreams(self, byte_stream_mv, shape_mv,
+                            byte_stream_feature, shape_feature, 
+                            byte_stream_z, shape_z):
+        
+        def iclr18_estrate_bits_z_decode(byte_stream_z, shape_z):
+            def decode_from_bits(byte_stream, shape):
+                cdfs = []
+                n,c,h,w = shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(self.bitEstimator_z(i - 0.5).view(1, c, 1, 1, 1).repeat(1, 1, h, w, 1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+
+                decoded = torchac.decode_float_cdf(cdfs, byte_stream)
+
+                return decoded
+            decoded = decode_from_bits(byte_stream_z, shape_z)
+
+            return decoded
+        compressed_z =  iclr18_estrate_bits_z_decode(byte_stream_z, shape_z)
+        recon_sigma = self.respriorDecoder(compressed_z)
+
+        def feature_probs_based_sigma_decode(byte_stream_feature, shape_feature, sigma):
+            def decode_from_bits(byte_stream, shape, gaussian):
+                # print("NIPS18noc : mn : ", torch.min(x), " - mx : ", torch.max(x), " range : ", self.mxrange)
+                cdfs = []
+                n,c,h,w = shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(gaussian.cdf(i - 0.5).view(n,c,h,w,1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+                decoded = torchac.decode_float_cdf(cdfs, byte_stream)
+                return decoded
+            
+            mu = torch.zeros_like(sigma)
+            sigma = sigma.clamp(1e-5, 1e10)
+            gaussian = torch.distributions.laplace.Laplace(mu, sigma)
+            decoded = decode_from_bits(byte_stream_feature, shape_feature, gaussian)
+
+            return decoded
+        compressed_feature_renorm = feature_probs_based_sigma_decode(byte_stream_feature, 
+                                shape_feature, recon_sigma)
+        
+        def iclr18_estrate_bits_mv_decode(byte_stream_mv, shape_mv):
+
+            def decode_from_bits(byte_stream, shape):
+                cdfs = []
+                n,c,h,w = shape
+                for i in range(-self.mxrange, self.mxrange):
+                    cdfs.append(self.bitEstimator_mv(i - 0.5).view(1, c, 1, 1, 1).repeat(1, 1, h, w, 1))
+                cdfs = torch.cat(cdfs, 4).cpu().detach()
+                decoded = torchac.decode_float_cdf(cdfs, byte_stream)
+                return decoded
+            decoded = decode_from_bits(byte_stream_mv, shape_mv)
+            return decoded
+        quant_mv = iclr18_estrate_bits_mv_decode(byte_stream_mv, shape_mv)
+
+        return quant_mv, compressed_feature_renorm
+
+    def forward_decode(self, referframe, 
+                    byte_stream_mv, shape_mv,
+                    byte_stream_feature, shape_feature,
+                    byte_stream_z, shape_z):
+        quant_mv, compressed_feature_renorm = self.decode_bytestreams(byte_stream_mv, shape_mv, 
+                                                    byte_stream_feature, shape_feature,
+                                                    byte_stream_z, shape_z)
+
+        quant_mv_upsample = self.mvDecoder(quant_mv)
+        prediction, warpframe = self.motioncompensation(referframe, quant_mv_upsample)
+        recon_res = self.resDecoder(compressed_feature_renorm)
+        recon_image = prediction + recon_res
+        clipped_recon_image = recon_image.clamp(0., 1.)
+
+        return clipped_recon_image
 
     def forward(self, input_image, referframe, quant_noise_feature=None, quant_noise_z=None, quant_noise_mv=None):
         estmv = self.opticFlow(input_image, referframe)
@@ -105,7 +258,7 @@ class VideoCompressor(nn.Module):
         clipped_recon_image = recon_image.clamp(0., 1.)
 
 
-# distortion
+        # distortion
         mse_loss = torch.mean((recon_image - input_image).pow(2))
 
         # psnr = tf.cond(
@@ -116,7 +269,7 @@ class VideoCompressor(nn.Module):
         interloss = torch.mean((prediction - input_image).pow(2))
         
 
-# bit per pixel
+        # bit per pixel
 
         def feature_probs_based_sigma(feature, sigma):
             
@@ -176,7 +329,6 @@ class VideoCompressor(nn.Module):
                 total_bits = real_bits
 
             return total_bits, prob
-
 
         def iclr18_estrate_bits_mv(mv):
 

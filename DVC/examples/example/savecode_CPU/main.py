@@ -104,6 +104,10 @@ def testuvg(global_step, testfull=False):
         sumpsnr = 0
         summsssim = 0
         cnt = 0
+
+        ms_ssim_list = []
+        bpp_list = []
+        psnr_list = []
         for batch_idx, input in enumerate(test_loader):
             if batch_idx % 10 == 0:
                 print("testing : %d/%d"% (batch_idx, len(test_loader)))
@@ -113,17 +117,37 @@ def testuvg(global_step, testfull=False):
             ref_psnr = input[3]
             ref_msssim = input[4]
             seqlen = input_images.size()[1]
-            sumbpp += torch.mean(ref_bpp).detach().numpy()
-            sumpsnr += torch.mean(ref_psnr).detach().numpy()
-            summsssim += torch.mean(ref_msssim).detach().numpy()
+            
+            this_bpp = torch.mean(ref_bpp).detach().numpy()
+            sumbpp += this_bpp
+            bpp_list.append(this_bpp)
+
+            this_psnr = torch.mean(ref_psnr).detach().numpy()
+            sumpsnr += this_psnr
+            psnr_list.append(this_psnr)
+
+            this_mssim = torch.mean(ref_msssim).detach().numpy()
+            summsssim += this_mssim
+            ms_ssim_list.append(this_mssim)
+
             cnt += 1
             for i in range(seqlen):
                 input_image = input_images[:, i, :, :, :]
                 inputframe, refframe = Var(input_image), Var(ref_image)
                 clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
-                sumbpp += torch.mean(bpp).cpu().detach().numpy()
-                sumpsnr += torch.mean(10 * (torch.log(1. / mse_loss) / np.log(10))).cpu().detach().numpy()
-                summsssim += ms_ssim(clipped_recon_image.cpu().detach(), input_image, data_range=1.0, size_average=True).numpy()
+                
+                this_bpp = torch.mean(bpp).cpu().detach().numpy()
+                sumbpp += this_bpp
+                bpp_list.append(this_bpp)
+                
+                this_psnr = torch.mean(10 * (torch.log(1. / mse_loss) / np.log(10))).cpu().detach().numpy()
+                sumpsnr += this_psnr
+                psnr_list.append(this_psnr)
+
+                this_mssim = ms_ssim(clipped_recon_image.cpu().detach(), input_image, data_range=1.0, size_average=True).numpy()
+                summsssim += this_mssim
+                ms_ssim_list.append(this_mssim)
+
                 cnt += 1
                 ref_image = clipped_recon_image
         log = "global step %d : " % (global_step) + "\n"
@@ -134,6 +158,7 @@ def testuvg(global_step, testfull=False):
         log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
         logger.info(log)
         uvgdrawplt([sumbpp], [sumpsnr], [summsssim], global_step, testfull=testfull)
+        # uvgdrawplt(bpp_list, psnr_list, ms_ssim_list, global_step, testfull=testfull)
 
 
 def train(epoch, global_step):
