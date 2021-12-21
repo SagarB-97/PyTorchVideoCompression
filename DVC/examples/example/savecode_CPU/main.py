@@ -18,6 +18,7 @@ import json
 from dataset import DataSet, UVGDataSet
 from tensorboardX import SummaryWriter
 from drawuvg import uvgdrawplt
+from noise_channel import noise_channel
 torch.backends.cudnn.enabled = True
 # gpu_num = 4
 gpu_num = torch.cuda.device_count()
@@ -100,72 +101,84 @@ def testuvg(global_step, testfull=False):
         test_loader = DataLoader(dataset=test_dataset, shuffle=False, num_workers=0, batch_size=1, pin_memory=False)
         print('Loaded test data')
         net.eval()
-        sumbpp = 0
-        sumpsnr = 0
-        summsssim = 0
-        cnt = 0
 
-        ms_ssim_list = []
-        bpp_list = []
-        psnr_list = []
-        for batch_idx, input in enumerate(test_loader):
-            if batch_idx % 10 == 0:
-                print("testing : %d/%d"% (batch_idx, len(test_loader)))
-            input_images = input[0]
-            ref_image = input[1]
-            ref_bpp = input[2]
-            ref_psnr = input[3]
-            ref_msssim = input[4]
-            seqlen = input_images.size()[1]
-            
-            this_bpp = torch.mean(ref_bpp).detach().numpy()
-            sumbpp += this_bpp
-            bpp_list.append(this_bpp)
+        csv_output = 'p,bpp,MSSIM,PSNR\n'
+        for prob_error in [0, 0.05, 0.1, 0.3]:
+            try:
+                print("Running for p : ", prob_error)
+                sumbpp = 0
+                sumpsnr = 0
+                summsssim = 0
+                cnt = 0
 
-            this_psnr = torch.mean(ref_psnr).detach().numpy()
-            sumpsnr += this_psnr
-            psnr_list.append(this_psnr)
+                ms_ssim_list = []
+                bpp_list = []
+                psnr_list = []
+                for batch_idx, input in enumerate(test_loader):
+                    if batch_idx % 10 == 0:
+                        print("testing : %d/%d"% (batch_idx, len(test_loader)))
+                    input_images = input[0]
+                    ref_image = input[1]
+                    ref_bpp = input[2]
+                    ref_psnr = input[3]
+                    ref_msssim = input[4]
+                    seqlen = input_images.size()[1]
+                    
+                    this_bpp = torch.mean(ref_bpp).detach().numpy()
+                    sumbpp += this_bpp
+                    bpp_list.append(this_bpp)
 
-            this_mssim = torch.mean(ref_msssim).detach().numpy()
-            summsssim += this_mssim
-            ms_ssim_list.append(this_mssim)
+                    this_psnr = torch.mean(ref_psnr).detach().numpy()
+                    sumpsnr += this_psnr
+                    psnr_list.append(this_psnr)
 
-            cnt += 1
-            for i in range(seqlen):
-                input_image = input_images[:, i, :, :, :]
-                inputframe, refframe = Var(input_image), Var(ref_image)
-                # clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
-                
-                byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z = net.forward_encode(input_image, ref_image)
-                clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
-                
-                mse_loss = torch.mean((recon_image - input_image).pow(2))
-                def get_bits_len(byte_stream):
-                    return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
-                bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
+                    this_mssim = torch.mean(ref_msssim).detach().numpy()
+                    summsssim += this_mssim
+                    ms_ssim_list.append(this_mssim)
 
-                this_bpp = torch.mean(bpp).cpu().detach().numpy()
-                sumbpp += this_bpp
-                bpp_list.append(this_bpp)
-                
-                this_psnr = torch.mean(10 * (torch.log(1. / mse_loss) / np.log(10))).cpu().detach().numpy()
-                sumpsnr += this_psnr
-                psnr_list.append(this_psnr)
+                    cnt += 1
+                    for i in range(seqlen):
+                        input_image = input_images[:, i, :, :, :]
+                        inputframe, refframe = Var(input_image), Var(ref_image)
+                        # clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
+                        
+                        byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z = net.forward_encode(input_image, ref_image)
+                        byte_stream_mv, byte_stream_feature, byte_stream_z = noise_channel(byte_stream_mv, byte_stream_feature, byte_stream_z, prob_error, prob_error, prob_error)
+                        clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
+                        
+                        mse_loss = torch.mean((recon_image - input_image).pow(2))
+                        def get_bits_len(byte_stream):
+                            return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
+                        bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
 
-                this_mssim = ms_ssim(clipped_recon_image.cpu().detach(), input_image, data_range=1.0, size_average=True).numpy()
-                summsssim += this_mssim
-                ms_ssim_list.append(this_mssim)
+                        this_bpp = torch.mean(bpp).cpu().detach().numpy()
+                        sumbpp += this_bpp
+                        bpp_list.append(this_bpp)
+                        
+                        this_psnr = torch.mean(10 * (torch.log(1. / mse_loss) / np.log(10))).cpu().detach().numpy()
+                        sumpsnr += this_psnr
+                        psnr_list.append(this_psnr)
 
-                cnt += 1
-                ref_image = clipped_recon_image
-        log = "global step %d : " % (global_step) + "\n"
-        logger.info(log)
-        sumbpp /= cnt
-        sumpsnr /= cnt
-        summsssim /= cnt
-        log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
-        logger.info(log)
+                        this_mssim = ms_ssim(clipped_recon_image.cpu().detach(), input_image, data_range=1.0, size_average=True).numpy()
+                        summsssim += this_mssim
+                        ms_ssim_list.append(this_mssim)
+
+                        cnt += 1
+                        ref_image = clipped_recon_image
+                log = "global step %d : " % (global_step) + "\n"
+                logger.info(log)
+                sumbpp /= cnt
+                sumpsnr /= cnt
+                summsssim /= cnt
+                log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
+                logger.info(log)
+                csv_output += f'{prob_error},{sumbpp},{summsssim},{sumpsnr}\n'
+            except:
+                print("Failed for prob_error : ", prob_error)
+                pass
         uvgdrawplt([sumbpp], [sumpsnr], [summsssim], global_step, testfull=testfull)
+        with open('performance/resiliency_check.csv', 'w') as f:
+            f.write(csv_output)
         # uvgdrawplt(bpp_list, psnr_list, ms_ssim_list, global_step, testfull=testfull)
 
 
