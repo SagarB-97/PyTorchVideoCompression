@@ -95,6 +95,13 @@ def Var(x):
     #return torch.tensor(x, requires_grad=True)#.cuda())
     return x
 
+def write_png(path, img):
+    dir = os.path.dirname(path)
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+    img_copy = np.transpose(torch.squeeze(img).cpu().numpy(), [1, 2, 0])
+    imageio.imwrite(path, img_copy)
+
 def testuvg(global_step, testfull=False):
     with torch.no_grad():
         print('Loading test data')
@@ -103,7 +110,7 @@ def testuvg(global_step, testfull=False):
         net.eval()
 
         csv_output = 'p,bpp,MSSIM,PSNR\n'
-        for prob_error in [0, 0.05, 0.1, 0.3]:
+        for prob_error in [0, 0.05]:#, 0.1, 0.3]:
             try:
                 print("Running for p : ", prob_error)
                 sumbpp = 0
@@ -146,6 +153,9 @@ def testuvg(global_step, testfull=False):
                         byte_stream_mv, byte_stream_feature, byte_stream_z = noise_channel(byte_stream_mv, byte_stream_feature, byte_stream_z, prob_error, prob_error, prob_error)
                         clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
                         
+                        write_png(f'performance/images_{int(prob_error*100)}_error/{i}_orig.png', input_image)
+                        write_png(f'performance/images_{int(prob_error*100)}_error/{i}_recon.png', clipped_recon_image)
+
                         mse_loss = torch.mean((recon_image - input_image).pow(2))
                         def get_bits_len(byte_stream):
                             return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
@@ -173,7 +183,8 @@ def testuvg(global_step, testfull=False):
                 log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
                 logger.info(log)
                 csv_output += f'{prob_error},{sumbpp},{summsssim},{sumpsnr}\n'
-            except:
+            except BaseException as error:
+                print('An exception occurred: {}'.format(error))
                 print("Failed for prob_error : ", prob_error)
                 pass
         uvgdrawplt([sumbpp], [sumpsnr], [summsssim], global_step, testfull=testfull)
