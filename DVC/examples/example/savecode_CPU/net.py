@@ -148,6 +148,19 @@ class VideoCompressor(nn.Module):
             byte_stream_feature, compressed_feature_renorm.shape, \
             byte_stream_z, compressed_z.shape
 
+    def forward_encode_v2(self, input_image, referframe):
+        estmv = self.opticFlow(input_image, referframe)
+        mvfeature = self.mvEncoder(estmv)
+        quant_mv = torch.round(mvfeature) ## Motion vectors
+
+        quant_mv_upsample = self.mvDecoder(quant_mv)
+        prediction, warpframe = self.motioncompensation(referframe, quant_mv_upsample)
+        input_residual = input_image - prediction
+        feature = self.resEncoder(input_residual)
+        compressed_feature_renorm = torch.round(feature) ## Residual
+        
+        return quant_mv, compressed_feature_renorm
+
     def decode_bytestreams(self, byte_stream_mv, shape_mv,
                             byte_stream_feature, shape_feature, 
                             byte_stream_z, shape_z):
@@ -215,6 +228,17 @@ class VideoCompressor(nn.Module):
         quant_mv, compressed_feature_renorm = self.decode_bytestreams(byte_stream_mv, shape_mv, 
                                                     byte_stream_feature, shape_feature,
                                                     byte_stream_z, shape_z)
+
+        quant_mv_upsample = self.mvDecoder(quant_mv)
+        prediction, warpframe = self.motioncompensation(referframe, quant_mv_upsample)
+        recon_res = self.resDecoder(compressed_feature_renorm)
+        recon_image = prediction + recon_res
+        clipped_recon_image = recon_image.clamp(0., 1.)
+
+        return clipped_recon_image, recon_image
+    
+    def forward_decode_v2(self, referframe, 
+                    quant_mv, compressed_feature_renorm):
 
         quant_mv_upsample = self.mvDecoder(quant_mv)
         prediction, warpframe = self.motioncompensation(referframe, quant_mv_upsample)

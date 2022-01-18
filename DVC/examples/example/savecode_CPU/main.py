@@ -18,7 +18,7 @@ import json
 from dataset import DataSet, UVGDataSet
 from tensorboardX import SummaryWriter
 from drawuvg import uvgdrawplt
-from noise_channel import noise_channel
+from noise_channel import *
 torch.backends.cudnn.enabled = True
 # gpu_num = 4
 gpu_num = torch.cuda.device_count()
@@ -110,9 +110,14 @@ def testuvg(global_step, testfull=False):
         net.eval()
 
         csv_output = 'p,bpp,MSSIM,PSNR\n'
-        for prob_error in [0, 0.05]:#, 0.1, 0.3]:
+
+        prob_errors = [0, 0.05]#, 0.1, 0.3]
+        # for prob_error in prob_errors:
+
+        gaussian_errors = [(0.0, 0.0), (0, 1), (1, 1)]
+        for error_mean, error_variance in gaussian_errors:
             try:
-                print("Running for p : ", prob_error)
+                print("Running for p : ", (error_mean, error_variance))
                 sumbpp = 0
                 sumpsnr = 0
                 summsssim = 0
@@ -149,17 +154,25 @@ def testuvg(global_step, testfull=False):
                         inputframe, refframe = Var(input_image), Var(ref_image)
                         # clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(inputframe, refframe)
                         
-                        byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z = net.forward_encode(input_image, ref_image)
-                        byte_stream_mv, byte_stream_feature, byte_stream_z = noise_channel(byte_stream_mv, byte_stream_feature, byte_stream_z, prob_error, prob_error, prob_error)
-                        clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
+                        # byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z = net.forward_encode(input_image, ref_image)
+                        # byte_stream_mv, byte_stream_feature, byte_stream_z = noise_channel(byte_stream_mv, byte_stream_feature, byte_stream_z, prob_error, prob_error, prob_error)
+                        # clipped_recon_image, recon_image =  net.forward_decode(ref_image, byte_stream_mv, shape_mv, byte_stream_feature, shape_feature, byte_stream_z, shape_z)
+
+                        quant_mv, compressed_feature_renorm = net.forward_encode_v2(input_image, ref_image)
+                        quant_mv_noisy, compressed_feature_renorm_noisy = real_noise_channel(quant_mv, compressed_feature_renorm, error_mean, error_variance)
+                        clipped_recon_image, recon_image =  net.forward_decode_v2(ref_image, quant_mv_noisy, compressed_feature_renorm_noisy)
                         
-                        write_png(f'performance/images_{int(prob_error*100)}_error/{i}_orig.png', input_image)
-                        write_png(f'performance/images_{int(prob_error*100)}_error/{i}_recon.png', clipped_recon_image)
+                        # write_png(f'performance/images_{int(prob_error*100)}_error/{i}_orig.png', input_image)
+                        # write_png(f'performance/images_{int(prob_error*100)}_error/{i}_recon.png', clipped_recon_image)
+
+                        write_png(f'performance/images_gauss_error_{error_mean}_{error_variance}/{i}_orig.png', input_image)
+                        write_png(f'performance/images_gauss_error_{error_mean}_{error_variance}/{i}_recon.png', clipped_recon_image)
 
                         mse_loss = torch.mean((recon_image - input_image).pow(2))
                         def get_bits_len(byte_stream):
                             return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
-                        bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
+                        # bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
+                        bpp = torch.tensor([0.15])
 
                         this_bpp = torch.mean(bpp).cpu().detach().numpy()
                         sumbpp += this_bpp
@@ -182,10 +195,11 @@ def testuvg(global_step, testfull=False):
                 summsssim /= cnt
                 log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
                 logger.info(log)
-                csv_output += f'{prob_error},{sumbpp},{summsssim},{sumpsnr}\n'
+                # csv_output += f'{prob_error},{sumbpp},{summsssim},{sumpsnr}\n'
             except BaseException as error:
                 print('An exception occurred: {}'.format(error))
-                print("Failed for prob_error : ", prob_error)
+                # print("Failed for prob_error : ", prob_error)
+                print("Failed for prob_error : ", (error_mean, error_variance))
                 pass
         uvgdrawplt([sumbpp], [sumpsnr], [summsssim], global_step, testfull=testfull)
         with open('performance/resiliency_check.csv', 'w') as f:
