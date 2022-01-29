@@ -95,7 +95,7 @@ class UVGDataSet(data.Dataset):
         return input_images, ref_image, self.refbpp[index], refpsnr, refmsssim
 
 class DataSet(data.Dataset):
-    def __init__(self, path="data/vimeo_septuplet/test.txt", im_height=256, im_width=256):
+    def __init__(self, path="../../data/vimeo_septuplet/test.txt", im_height=256, im_width=256):
         self.image_input_list, self.image_ref_list = self.get_vimeo(filefolderlist=path)
         self.im_height = im_height
         self.im_width = im_width
@@ -105,7 +105,7 @@ class DataSet(data.Dataset):
         self.mvnois = torch.zeros([out_channel_mv, self.im_height // 16, self.im_width // 16])
         print("dataset find image: ", len(self.image_input_list))
 
-    def get_vimeo(self, rootdir="data/vimeo_septuplet/sequences/", filefolderlist="data/vimeo_septuplet/test.txt"):
+    def get_vimeo(self, rootdir="../../data/vimeo_septuplet/sequences/", filefolderlist="../../data/vimeo_septuplet/test.txt"):
         with open(filefolderlist) as f:
             data = f.readlines()
             

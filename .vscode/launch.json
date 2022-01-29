@@ -5,11 +5,38 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "args": ["--log", "loguvg.txt", "--testuvg", "--pretrain", "snapshot/dvc_pretrain2048.model", "--config", "config.json"],
+            "args": [
+                "--log",
+                "loguvg.txt",
+                "--pretrain",
+                "",
+                "--config",
+                "config.json"
+            ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"
             },
-            "name": "Debug main from test.sh",
+            "name": "Training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "/home/sagar/DNNVideoCodecs/PyTorchVideoCompression/DVC/examples/example/"
+        },
+        {
+            "args": [
+                "--log",
+                "loguvg.txt",
+                "--testuvg",
+                "--pretrain",
+                "",
+                "--config",
+                "config.json"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"
+            },
+            "name": "Testing",
             "type": "python",
             "request": "launch",
             "program": "${file}",

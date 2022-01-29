@@ -1,5 +1,5 @@
 {
-    "tot_epoch": 10000,
+    "tot_epoch": 100,
     "tot_step": 2000000,
     "train_lambda": 2048,
     "lr": {

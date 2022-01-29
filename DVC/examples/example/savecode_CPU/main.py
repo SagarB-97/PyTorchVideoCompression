@@ -1,6 +1,7 @@
 
 import os
 import argparse
+from pickletools import uint8
 import torch
 import cv2
 import logging
@@ -100,7 +101,7 @@ def write_png(path, img):
     if not os.path.exists(dir):
         os.makedirs(dir)
     img_copy = np.transpose(torch.squeeze(img).cpu().numpy(), [1, 2, 0])
-    imageio.imwrite(path, img_copy)
+    imageio.imwrite(path, (img_copy * 255.0).astype(np.uint8))
 
 def testuvg(global_step, testfull=False):
     with torch.no_grad():
@@ -109,15 +110,16 @@ def testuvg(global_step, testfull=False):
         print('Loaded test data')
         net.eval()
 
-        csv_output = 'p,bpp,MSSIM,PSNR\n'
-
-        prob_errors = [0, 0.05]#, 0.1, 0.3]
+        # csv_output = 'p,bpp,MSSIM,PSNR\n'
+        # prob_errors = [0, 0.05]#, 0.1, 0.3]
         # for prob_error in prob_errors:
 
-        gaussian_errors = [(0.0, 0.0), (0, 1), (1, 1)]
+        csv_output = 'err_mean,err_var,bpp,MSSIM,PSNR\n'
+        gaussian_errors = [(0, 0), (0, 1), (0, 2)]
         for error_mean, error_variance in gaussian_errors:
             try:
                 print("Running for p : ", (error_mean, error_variance))
+                # print("Running for p : ", prob_error)
                 sumbpp = 0
                 sumpsnr = 0
                 summsssim = 0
@@ -172,7 +174,8 @@ def testuvg(global_step, testfull=False):
                         def get_bits_len(byte_stream):
                             return torch.from_numpy(np.array([len(byte_stream) * 8])).float()
                         # bpp = (get_bits_len(byte_stream_mv) + get_bits_len(byte_stream_feature) + get_bits_len(byte_stream_z)) / (input_image.shape[2] * input_image.shape[3])
-                        bpp = torch.tensor([0.15])
+                        bpp = (len(torch.flatten(quant_mv)) + len(torch.flatten(compressed_feature_renorm))) * 6 / (input_image.shape[2] * input_image.shape[3])
+                        bpp = torch.tensor([bpp])
 
                         this_bpp = torch.mean(bpp).cpu().detach().numpy()
                         sumbpp += this_bpp
@@ -195,6 +198,7 @@ def testuvg(global_step, testfull=False):
                 summsssim /= cnt
                 log = "UVGdataset : average bpp : %.6lf, average psnr : %.6lf, average msssim: %.6lf\n" % (sumbpp, sumpsnr, summsssim)
                 logger.info(log)
+                csv_output += f'{error_mean},{error_variance},{sumbpp},{summsssim},{sumpsnr}\n'
                 # csv_output += f'{prob_error},{sumbpp},{summsssim},{sumpsnr}\n'
             except BaseException as error:
                 print('An exception occurred: {}'.format(error))
@@ -211,7 +215,8 @@ def train(epoch, global_step):
 
     print ("epoch", epoch)
     global gpu_per_batch
-    train_loader = DataLoader(dataset = train_dataset, shuffle=True, num_workers=gpu_num, batch_size=gpu_per_batch, pin_memory=True)
+    # train_loader = DataLoader(dataset = train_dataset, shuffle=True, num_workers=gpu_num, batch_size=gpu_per_batch, pin_memory=True)
+    train_loader = DataLoader(dataset = train_dataset, shuffle=True, batch_size=10)
     net.train()
 
     global optimizer
@@ -228,12 +233,15 @@ def train(epoch, global_step):
     tot_iter = len(train_loader)
     t0 = datetime.datetime.now()
     for batch_idx, input in enumerate(train_loader):
+        if batch_idx % 10 == 0:
+            print("\tbatch_idx: ", batch_idx)
+        
         global_step += 1
         bat_cnt += 1
         input_image, ref_image = Var(input[0]), Var(input[1])
         quant_noise_feature, quant_noise_z, quant_noise_mv = Var(input[2]), Var(input[3]), Var(input[4])
         # ta = datetime.datetime.now()
-        clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net(input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv)
+        clipped_recon_image, mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = net.forward_v2(input_image, ref_image, quant_noise_feature, quant_noise_z, quant_noise_mv)
         
         # tb = datetime.datetime.now()
         mse_loss, warploss, interloss, bpp_feature, bpp_z, bpp_mv, bpp = \
@@ -345,7 +353,7 @@ if __name__ == "__main__":
         exit(0)
 
     tb_logger = SummaryWriter('./events')
-    train_dataset = DataSet("data/vimeo_septuplet/test.txt")
+    train_dataset = DataSet("../../data/vimeo_septuplet/test.txt")
     # test_dataset = UVGDataSet(refdir=ref_i_dir)
     stepoch = global_step // (train_dataset.__len__() // (gpu_per_batch))# * gpu_num))
     for epoch in range(stepoch, tot_epoch):

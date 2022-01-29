@@ -4,6 +4,7 @@
 *.model
 log/*
 data/output/*
+data/
 *.pkl
 *.log
 *.ll
@@ -32,3 +33,4 @@ fullperformance/*
 *.yuv
 savecode/
 *.csv
+data
